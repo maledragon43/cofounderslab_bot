@@ -154,6 +154,10 @@ class CoFoundersLabBot:
             # Navigate to CoFoundersLab
             self.driver.get("https://cofounderslab.com/")
             
+            # Wait for initial page load
+            self.log_message("Waiting for CoFoundersLab to load...")
+            self.wait_for_page_load()
+            
             self.log_message("Website opened successfully!")
             self.update_status("Website opened - Please login and navigate to target page")
             self.open_btn.config(state="disabled")
@@ -254,9 +258,15 @@ class CoFoundersLabBot:
                 # Find all user cards with message buttons
                 message_buttons = self.find_message_buttons()
                 
+                # If no message buttons found, wait and try again
                 if not message_buttons:
-                    self.log_message("No message buttons found on this page")
-                    break
+                    self.log_message("No message buttons found on this page, waiting 2 seconds and retrying...")
+                    time.sleep(2)
+                    message_buttons = self.find_message_buttons()
+                    
+                    if not message_buttons:
+                        self.log_message("Still no message buttons found after retry")
+                        break
                     
                 self.log_message(f"Found {len(message_buttons)} users to message")
                 
@@ -284,7 +294,18 @@ class CoFoundersLabBot:
                                 break
                             time.sleep(1)  # Wait 1 second between messages
                         else:
-                            self.log_message(f"Failed to message user {i+1}")
+                            self.log_message(f"Failed to message user {i+1}, waiting 2 seconds and retrying...")
+                            time.sleep(2)
+                            # Try sending message again
+                            if self.send_message_to_user(button):
+                                success_count += 1
+                                self.log_message(f"Successfully messaged user {i+1} on retry")
+                                if not self.is_running:
+                                    self.log_message("Stopping automation - stop button clicked")
+                                    break
+                                time.sleep(1)
+                            else:
+                                self.log_message(f"Failed to message user {i+1} even after retry")
                             
                     except (TimeoutException, WebDriverException, NoSuchElementException) as e:
                         self.log_message(f"Error messaging user {i+1}: {str(e)}")
@@ -299,7 +320,9 @@ class CoFoundersLabBot:
                 if self.is_running:
                     if self.go_to_next_page():
                         self.log_message(f"Navigated to page {self.current_page + 1}")
-                        time.sleep(2)  # Wait 2 seconds for page to load
+                        self.log_message("Waiting for page to fully load...")
+                        # Wait for page to fully load before continuing
+                        self.wait_for_page_load()
                     else:
                         self.log_message("No more pages available")
                         break
@@ -329,6 +352,9 @@ class CoFoundersLabBot:
             WebDriverWait(self.driver, 10).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "[class*='message'], [class*='Message'], button"))
             )
+            
+            # Wait a bit more for dynamic content to load
+            time.sleep(1)
             
             # Try different selectors for message buttons
             selectors = [
@@ -546,8 +572,34 @@ class CoFoundersLabBot:
                         continue
                     
             if not send_button:
-                self.log_message("Could not find send button")
-                return False
+                self.log_message("Could not find send button, waiting 2 seconds and retrying...")
+                time.sleep(2)
+                
+                # Try again with a simpler approach
+                try:
+                    # Try the most common selectors again
+                    simple_selectors = [
+                        "button:contains('Send')",
+                        "button[type='submit']",
+                        "button.bg-primary",
+                        "button.sm\\:col-start-2"
+                    ]
+                    
+                    for selector in simple_selectors:
+                        try:
+                            send_button = modal.find_element(By.CSS_SELECTOR, selector)
+                            if send_button:
+                                self.log_message(f"Found send button on retry with selector: {selector}")
+                                break
+                        except:
+                            continue
+                            
+                except:
+                    pass
+                    
+                if not send_button:
+                    self.log_message("Could not find send button even after retry")
+                    return False
                 
             # Check stop condition before sending
             if not self.is_running:
@@ -612,6 +664,33 @@ class CoFoundersLabBot:
         except (WebDriverException, ValueError) as e:
             self.log_message(f"Error navigating to next page: {str(e)}")
             return False
+            
+    def wait_for_page_load(self):
+        """Wait for page to fully load"""
+        try:
+            # Wait for document ready state
+            WebDriverWait(self.driver, 15).until(
+                lambda driver: driver.execute_script("return document.readyState") == "complete"
+            )
+            self.log_message("Document ready state: complete")
+            
+            # Wait for any loading indicators to disappear
+            time.sleep(2)
+            
+            # Wait for user cards to be present
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "button, [class*='card'], [class*='user']"))
+            )
+            self.log_message("User cards detected on page")
+            
+            # Additional wait for dynamic content
+            time.sleep(1)
+            self.log_message("Page fully loaded and ready")
+            
+        except TimeoutException:
+            self.log_message("Page load timeout, but continuing...")
+        except Exception as e:
+            self.log_message(f"Error waiting for page load: {str(e)}")
             
     def run(self):
         """Start the application"""
