@@ -215,19 +215,35 @@ class CoFoundersLabBot:
                 # Send messages to all users
                 success_count = 0
                 for i, button in enumerate(message_buttons):
+                    # Check stop condition before each user
                     if not self.is_running:
+                        self.log_message("Stopping automation - stop button clicked")
                         break
                         
                     try:
                         self.log_message(f"Messaging user {i+1}/{len(message_buttons)}")
+                        
+                        # Check stop condition before sending message
+                        if not self.is_running:
+                            self.log_message("Stopping automation - stop button clicked")
+                            break
+                            
                         if self.send_message_to_user(button):
                             success_count += 1
+                            # Check stop condition after each message
+                            if not self.is_running:
+                                self.log_message("Stopping automation - stop button clicked")
+                                break
                             time.sleep(2)  # Wait between messages
                         else:
                             self.log_message(f"Failed to message user {i+1}")
                             
                     except (TimeoutException, WebDriverException, NoSuchElementException) as e:
                         self.log_message(f"Error messaging user {i+1}: {str(e)}")
+                        # Check stop condition after error
+                        if not self.is_running:
+                            self.log_message("Stopping automation - stop button clicked")
+                            break
                         
                 self.log_message(f"Successfully messaged {success_count} users on page {self.current_page}")
                 
@@ -300,9 +316,17 @@ class CoFoundersLabBot:
     def send_message_to_user(self, message_button):
         """Send message to a specific user"""
         try:
+            # Check stop condition before starting
+            if not self.is_running:
+                return False
+                
             # Click the message button
             self.driver.execute_script("arguments[0].click();", message_button)
             time.sleep(2)
+            
+            # Check stop condition after clicking
+            if not self.is_running:
+                return False
             
             # Wait for modal to appear
             try:
@@ -337,10 +361,18 @@ class CoFoundersLabBot:
                 self.log_message("Could not find text input in modal")
                 return False
                 
+            # Check stop condition before entering message
+            if not self.is_running:
+                return False
+                
             # Clear and enter message
             text_input.clear()
             text_input.send_keys(self.message_text)
             time.sleep(1)
+            
+            # Check stop condition after entering message
+            if not self.is_running:
+                return False
             
             # Find and click send button
             send_button = None
@@ -365,9 +397,17 @@ class CoFoundersLabBot:
                 self.log_message("Could not find send button")
                 return False
                 
+            # Check stop condition before sending
+            if not self.is_running:
+                return False
+                
             # Click send button
             self.driver.execute_script("arguments[0].click();", send_button)
             time.sleep(2)
+            
+            # Check stop condition after sending
+            if not self.is_running:
+                return False
             
             # Try to close modal or wait for it to disappear
             try:
