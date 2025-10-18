@@ -20,6 +20,7 @@ class CoFoundersLabBot:
         # Bot state
         self.driver = None
         self.is_running = False
+        self.is_paused = False
         self.current_page = 1
         self.message_text = ""
         
@@ -51,7 +52,7 @@ class CoFoundersLabBot:
         self.open_btn = ttk.Button(buttons_frame, text="Open Site", command=self.open_site)
         self.open_btn.grid(row=0, column=0, padx=(0, 10))
         
-        # Start Messaging button
+        # Start/Continue Messaging button
         self.start_btn = ttk.Button(buttons_frame, text="Start Messaging", command=self.start_messaging)
         self.start_btn.grid(row=0, column=1, padx=(0, 10))
         
@@ -131,7 +132,7 @@ class CoFoundersLabBot:
             messagebox.showerror("Error", f"Failed to open website: {str(e)}")
             
     def start_messaging(self):
-        """Start the messaging automation"""
+        """Start or continue the messaging automation"""
         if not self.driver:
             messagebox.showwarning("Warning", "Please open the website first!")
             return
@@ -142,8 +143,16 @@ class CoFoundersLabBot:
             messagebox.showwarning("Warning", "Please enter a message to send!")
             return
             
-        # Start automation in separate thread
-        self.is_running = True
+        # Resume or start automation
+        if self.is_paused:
+            self.log_message("Resuming automation...")
+            self.is_running = True
+            self.is_paused = False
+        else:
+            self.log_message("Starting automation...")
+            self.is_running = True
+            self.is_paused = False
+            
         self.start_btn.config(state="disabled")
         self.stop_btn.config(state="normal")
         self.progress.start()
@@ -156,11 +165,12 @@ class CoFoundersLabBot:
     def stop_messaging(self):
         """Stop the messaging automation"""
         self.is_running = False
-        self.start_btn.config(state="normal")
+        self.is_paused = True
+        self.start_btn.config(text="Continue", state="normal")
         self.stop_btn.config(state="disabled")
         self.progress.stop()
-        self.update_status("Stopped")
-        self.log_message("Automation stopped by user")
+        self.update_status("Paused - Click Continue to resume")
+        self.log_message("Automation paused by user - Click Continue to resume")
         
         # Force stop any ongoing operations
         try:
