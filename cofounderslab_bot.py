@@ -125,7 +125,9 @@ class CoFoundersLabBot:
             self.log_message("Website opened successfully!")
             self.update_status("Website opened - Please login and navigate to target page")
             self.open_btn.config(state="disabled")
-            self.start_btn.config(state="normal")
+            self.start_btn.config(text="Start Messaging", state="normal")
+            # Reset pause state when opening new site
+            self.is_paused = False
             
         except (WebDriverException, OSError, ValueError) as e:
             self.log_message(f"Error opening website: {str(e)}")
@@ -194,8 +196,12 @@ class CoFoundersLabBot:
     def automation_loop(self):
         """Main automation loop"""
         try:
-            self.log_message("Starting automation...")
-            self.update_status("Running automation...")
+            if self.is_paused:
+                self.log_message("Resuming automation from where it left off...")
+                self.update_status("Resuming automation...")
+            else:
+                self.log_message("Starting automation...")
+                self.update_status("Running automation...")
             
             while self.is_running:
                 # Check if we're on a search page
@@ -271,11 +277,18 @@ class CoFoundersLabBot:
             self.update_status("Error occurred")
             
         finally:
-            self.is_running = False
-            self.start_btn.config(state="normal")
-            self.stop_btn.config(state="disabled")
-            self.progress.stop()
-            self.update_status("Automation completed")
+            # Only reset to start if automation completed naturally (not paused)
+            if not self.is_paused:
+                self.is_running = False
+                self.start_btn.config(text="Start Messaging", state="normal")
+                self.stop_btn.config(state="disabled")
+                self.progress.stop()
+                self.update_status("Automation completed")
+            else:
+                # If paused, keep the continue button ready
+                self.start_btn.config(text="Continue", state="normal")
+                self.stop_btn.config(state="disabled")
+                self.progress.stop()
             
     def find_message_buttons(self):
         """Find all message buttons on the current page"""
