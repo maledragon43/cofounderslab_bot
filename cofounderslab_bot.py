@@ -76,9 +76,21 @@ class CoFoundersLabBot:
         log_frame = ttk.LabelFrame(main_frame, text="Activity Log", padding="10")
         log_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
         
-        # Log text
+        # Log text with history
         self.log_text = scrolledtext.ScrolledText(log_frame, height=10, width=70)
         self.log_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # Log controls frame
+        log_controls_frame = ttk.Frame(log_frame)
+        log_controls_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(5, 0))
+        
+        # Clear log button
+        clear_log_btn = ttk.Button(log_controls_frame, text="Clear Log", command=self.clear_log)
+        clear_log_btn.grid(row=0, column=0, padx=(0, 10))
+        
+        # Save log button
+        save_log_btn = ttk.Button(log_controls_frame, text="Save Log", command=self.save_log)
+        save_log_btn.grid(row=0, column=1)
         
         # Configure grid weights
         self.root.columnconfigure(0, weight=1)
@@ -96,6 +108,26 @@ class CoFoundersLabBot:
         self.log_text.insert(tk.END, log_entry)
         self.log_text.see(tk.END)
         self.root.update_idletasks()
+        
+    def clear_log(self):
+        """Clear the log history"""
+        self.log_text.delete(1.0, tk.END)
+        self.log_message("Log cleared")
+        
+    def save_log(self):
+        """Save log to file"""
+        try:
+            from tkinter import filedialog
+            filename = filedialog.asksaveasfilename(
+                defaultextension=".txt",
+                filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+            )
+            if filename:
+                with open(filename, 'w', encoding='utf-8') as f:
+                    f.write(self.log_text.get(1.0, tk.END))
+                self.log_message(f"Log saved to: {filename}")
+        except Exception as e:
+            self.log_message(f"Error saving log: {str(e)}")
         
     def update_status(self, status):
         """Update status label"""
@@ -426,14 +458,34 @@ class CoFoundersLabBot:
             # Check stop condition after entering message
             if not self.is_running:
                 return False
+                
+            # Wait a bit more for the send button to become enabled/visible
+            time.sleep(1)
             
             # Find and click send button
+            self.log_message("Looking for send button after entering message...")
             send_button = None
             send_selectors = [
+                # Specific CoFoundersLab send button selector
+                "#headlessui-dialog-\\:ri\\: > div > form > div.mt-6.grid.grid-flow-row-dense.grid-cols-2.gap-3 > button.inline-flex.items-center.justify-center.gap-2.border.border-transparent.disabled\\:opacity-50.bg-primary.text-primary-content.hover\\:bg-primary-hover.hover\\:text-primary-content.disabled\\:hover\\:bg-primary.px-4.py-2.rounded-md.sm\\:col-start-2",
+                # Simplified versions of the above
+                "button.inline-flex.items-center.justify-center.gap-2.border.border-transparent.bg-primary.text-primary-content.px-4.py-2.rounded-md.sm\\:col-start-2",
+                "button.bg-primary.text-primary-content.rounded-md.sm\\:col-start-2",
+                "button.sm\\:col-start-2",
+                # Generic selectors
+                "button:contains('Send')",
+                "button span:contains('Send')",
+                "button span.inline-block:contains('Send')",
+                "button[type='submit']",
+                "button[type='submit'] span:contains('Send')",
+                "button[class*='inline-flex'] span:contains('Send')",
+                "button[class*='items-center'] span:contains('Send')",
+                "button[class*='justify-center'] span:contains('Send')",
+                "button[class*='border'] span:contains('Send')",
+                "button[class*='bg-primary'] span:contains('Send')",
+                "button[class*='rounded-md'] span:contains('Send')",
                 "button[class*='send']",
                 "button[class*='Send']",
-                "button:contains('Send')",
-                "button:contains('send')",
                 "[class*='btn'][class*='send']",
                 "input[type='submit']"
             ]
@@ -442,9 +494,56 @@ class CoFoundersLabBot:
                 try:
                     send_button = modal.find_element(By.CSS_SELECTOR, selector)
                     if send_button:
+                        self.log_message(f"Found send button with selector: {selector}")
                         break
                 except (NoSuchElementException, TimeoutException):
                     continue
+                    
+            # Try finding send button in the entire document (not just modal)
+            if not send_button:
+                self.log_message("Trying to find send button in entire document...")
+                try:
+                    # Try the specific CoFoundersLab selector on the entire document
+                    send_button = self.driver.find_element(By.CSS_SELECTOR, 
+                        "#headlessui-dialog-\\:ri\\: > div > form > div.mt-6.grid.grid-flow-row-dense.grid-cols-2.gap-3 > button.inline-flex.items-center.justify-center.gap-2.border.border-transparent.disabled\\:opacity-50.bg-primary.text-primary-content.hover\\:bg-primary-hover.hover\\:text-primary-content.disabled\\:hover\\:bg-primary.px-4.py-2.rounded-md.sm\\:col-start-2")
+                    if send_button:
+                        self.log_message("Found send button using document-wide selector")
+                except:
+                    pass
+                    
+            # Fallback: search all buttons in modal for "Send" text
+            if not send_button:
+                self.log_message("Trying fallback method to find send button...")
+                modal_buttons = modal.find_elements(By.TAG_NAME, "button")
+                self.log_message(f"Found {len(modal_buttons)} buttons in modal")
+                for i, button in enumerate(modal_buttons):
+                    try:
+                        button_text = button.text.strip()
+                        button_class = button.get_attribute("class")
+                        self.log_message(f"Button {i+1}: text='{button_text}', class='{button_class[:50]}...'")
+                    except:
+                        pass
+                        
+                for button in modal_buttons:
+                    try:
+                        button_text = button.text.lower()
+                        if "send" in button_text or button_text.strip() == "send":
+                            send_button = button
+                            self.log_message("Found send button using fallback method")
+                            break
+                            
+                        # Check span elements inside button
+                        spans = button.find_elements(By.TAG_NAME, "span")
+                        for span in spans:
+                            span_text = span.text.lower()
+                            if "send" in span_text or span_text.strip() == "send":
+                                send_button = button
+                                self.log_message("Found send button in span using fallback method")
+                                break
+                        if send_button:
+                            break
+                    except (NoSuchElementException, TimeoutException):
+                        continue
                     
             if not send_button:
                 self.log_message("Could not find send button")
@@ -454,7 +553,20 @@ class CoFoundersLabBot:
             if not self.is_running:
                 return False
                 
+            # Check if send button is enabled
+            try:
+                is_enabled = send_button.is_enabled()
+                self.log_message(f"Send button enabled: {is_enabled}")
+                if not is_enabled:
+                    self.log_message("Send button is disabled, waiting...")
+                    time.sleep(2)
+                    is_enabled = send_button.is_enabled()
+                    self.log_message(f"Send button enabled after wait: {is_enabled}")
+            except:
+                self.log_message("Could not check if send button is enabled")
+                
             # Click send button
+            self.log_message("Clicking send button...")
             self.driver.execute_script("arguments[0].click();", send_button)
             time.sleep(1)  # Wait 1 second after sending
             
