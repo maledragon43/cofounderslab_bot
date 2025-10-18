@@ -250,7 +250,7 @@ class CoFoundersLabBot:
                             if not self.is_running:
                                 self.log_message("Stopping automation - stop button clicked")
                                 break
-                            time.sleep(2)  # Wait between messages
+                            time.sleep(1)  # Wait 1 second between messages
                         else:
                             self.log_message(f"Failed to message user {i+1}")
                             
@@ -267,7 +267,7 @@ class CoFoundersLabBot:
                 if self.is_running:
                     if self.go_to_next_page():
                         self.log_message(f"Navigated to page {self.current_page + 1}")
-                        time.sleep(3)  # Wait for page to load
+                        time.sleep(2)  # Wait 2 seconds for page to load
                     else:
                         self.log_message("No more pages available")
                         break
@@ -300,11 +300,19 @@ class CoFoundersLabBot:
             
             # Try different selectors for message buttons
             selectors = [
+                "button:contains('Message')",
+                "button span:contains('Message')",
+                "button span.inline-block:contains('Message')",
+                "button:has(svg) span:contains('Message')",
+                "button[class*='inline-flex'] span:contains('Message')",
+                "button[class*='items-center'] span:contains('Message')",
+                "button[class*='justify-center'] span:contains('Message')",
+                "button[class*='rounded'] span:contains('Message')",
+                "button[class*='border'] span:contains('Message')",
                 "button[class*='message']",
                 "button[class*='Message']",
                 "a[class*='message']",
                 "a[class*='Message']",
-                "button:contains('Message')",
                 "a:contains('Message')",
                 "[data-testid*='message']",
                 "[class*='btn'][class*='message']"
@@ -315,6 +323,7 @@ class CoFoundersLabBot:
                 try:
                     buttons = self.driver.find_elements(By.CSS_SELECTOR, selector)
                     if buttons:
+                        self.log_message(f"Found {len(buttons)} buttons with selector: {selector}")
                         message_buttons.extend(buttons)
                         break
                 except (TimeoutException, WebDriverException):
@@ -322,14 +331,33 @@ class CoFoundersLabBot:
                     
             # If no specific selectors work, try to find buttons with "message" text
             if not message_buttons:
+                self.log_message("Trying fallback method to find message buttons...")
                 all_buttons = self.driver.find_elements(By.TAG_NAME, "button")
+                self.log_message(f"Found {len(all_buttons)} total buttons on page")
                 for button in all_buttons:
                     try:
-                        if "message" in button.text.lower() or "message" in button.get_attribute("class").lower():
+                        button_text = button.text.lower()
+                        button_class = button.get_attribute("class").lower()
+                        
+                        # Check for "message" in text or class
+                        if ("message" in button_text or 
+                            "message" in button_class or
+                            button_text.strip() == "message"):
                             message_buttons.append(button)
+                            continue
+                            
+                        # Check for span elements inside button that contain "Message"
+                        spans = button.find_elements(By.TAG_NAME, "span")
+                        for span in spans:
+                            span_text = span.text.lower()
+                            if "message" in span_text or span_text.strip() == "message":
+                                message_buttons.append(button)
+                                break
+                                
                     except (NoSuchElementException, TimeoutException):
                         continue
                         
+            self.log_message(f"Total message buttons found: {len(message_buttons)}")
             return message_buttons
             
         except (TimeoutException, WebDriverException) as e:
@@ -345,7 +373,7 @@ class CoFoundersLabBot:
                 
             # Click the message button
             self.driver.execute_script("arguments[0].click();", message_button)
-            time.sleep(2)
+            time.sleep(1)  # Wait 1 second after clicking
             
             # Check stop condition after clicking
             if not self.is_running:
@@ -356,6 +384,7 @@ class CoFoundersLabBot:
                 modal = WebDriverWait(self.driver, 10).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, "[class*='modal'], [class*='Modal'], [role='dialog']"))
                 )
+                time.sleep(1)  # Wait 1 second for modal to fully load
             except TimeoutException:
                 self.log_message("Modal did not appear")
                 return False
@@ -390,8 +419,9 @@ class CoFoundersLabBot:
                 
             # Clear and enter message
             text_input.clear()
+            time.sleep(0.5)  # Wait 0.5 seconds before typing
             text_input.send_keys(self.message_text)
-            time.sleep(1)
+            time.sleep(1)  # Wait 1 second after typing
             
             # Check stop condition after entering message
             if not self.is_running:
@@ -426,7 +456,7 @@ class CoFoundersLabBot:
                 
             # Click send button
             self.driver.execute_script("arguments[0].click();", send_button)
-            time.sleep(2)
+            time.sleep(1)  # Wait 1 second after sending
             
             # Check stop condition after sending
             if not self.is_running:
@@ -436,12 +466,14 @@ class CoFoundersLabBot:
             try:
                 cancel_button = modal.find_element(By.CSS_SELECTOR, "button[class*='cancel'], button[class*='Cancel'], button:contains('Cancel')")
                 self.driver.execute_script("arguments[0].click();", cancel_button)
+                time.sleep(1)  # Wait 1 second after closing modal
             except (NoSuchElementException, TimeoutException):
                 # Press Escape key to close modal
                 from selenium.webdriver.common.keys import Keys
                 text_input.send_keys(Keys.ESCAPE)
+                time.sleep(1)  # Wait 1 second after pressing escape
                 
-            time.sleep(1)
+            time.sleep(1)  # Additional wait for modal to close
             return True
             
         except (TimeoutException, WebDriverException, NoSuchElementException) as e:
@@ -461,6 +493,7 @@ class CoFoundersLabBot:
                 new_url = f"{current_url}{separator}page={self.current_page + 1}"
                 
             self.driver.get(new_url)
+            time.sleep(1)  # Wait 1 second for page navigation
             self.current_page += 1
             return True
             
