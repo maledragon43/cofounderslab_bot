@@ -23,6 +23,8 @@ class CoFoundersLabBot:
         self.is_paused = False
         self.current_page = 1
         self.message_text = ""
+        self.messaged_users = set()  # Track messaged users to prevent duplicates
+        self.currently_messaging = set()  # Track users currently being messaged
         
         # Setup logging
         logging.basicConfig(level=logging.INFO)
@@ -162,8 +164,11 @@ class CoFoundersLabBot:
             self.update_status("Website opened - Please login and navigate to target page")
             self.open_btn.config(state="disabled")
             self.start_btn.config(text="Start Messaging", state="normal")
-            # Reset pause state when opening new site
+            # Reset pause state and clear tracking when opening new site
             self.is_paused = False
+            self.messaged_users.clear()
+            self.currently_messaging.clear()
+            self.log_message("Reset messaged users and messaging tracking")
             
         except (WebDriverException, OSError, ValueError) as e:
             self.log_message(f"Error opening website: {str(e)}")
@@ -258,15 +263,10 @@ class CoFoundersLabBot:
                 # Find all user cards with message buttons
                 message_buttons = self.find_message_buttons()
                 
-                # If no message buttons found, wait and try again
+                # If no message buttons found, move to next page
                 if not message_buttons:
-                    self.log_message("No message buttons found on this page, waiting 2 seconds and retrying...")
-                    time.sleep(2)
-                    message_buttons = self.find_message_buttons()
-                    
-                    if not message_buttons:
-                        self.log_message("Still no message buttons found after retry")
-                        break
+                    self.log_message("No message buttons found on this page")
+                    break
                     
                 self.log_message(f"Found {len(message_buttons)} users to message")
                 
@@ -279,33 +279,49 @@ class CoFoundersLabBot:
                         break
                         
                     try:
+                        # Create a unique identifier for this user button
+                        user_id = f"page_{self.current_page}_user_{i}"
+                        
+                        # Check if we've already messaged this user
+                        if user_id in self.messaged_users:
+                            self.log_message(f"User {i+1} already messaged, skipping...")
+                            continue
+                            
+                        # Check if we're currently messaging this user
+                        if user_id in self.currently_messaging:
+                            self.log_message(f"User {i+1} currently being messaged, skipping...")
+                            continue
+                            
+                        # Mark user as currently being messaged
+                        self.currently_messaging.add(user_id)
                         self.log_message(f"Messaging user {i+1}/{len(message_buttons)}")
                         
                         # Check stop condition before sending message
                         if not self.is_running:
                             self.log_message("Stopping automation - stop button clicked")
+                            self.currently_messaging.discard(user_id)
                             break
                             
-                        if self.send_message_to_user(button):
+                        # Try to send message to user
+                        message_sent = self.send_message_to_user(button)
+                        
+                        if message_sent:
+                            # Mark user as messaged immediately after successful send
+                            self.messaged_users.add(user_id)
                             success_count += 1
+                            self.log_message(f"Successfully messaged user {i+1}")
+                            # Remove from currently messaging
+                            self.currently_messaging.discard(user_id)
                             # Check stop condition after each message
                             if not self.is_running:
                                 self.log_message("Stopping automation - stop button clicked")
                                 break
                             time.sleep(1)  # Wait 1 second between messages
                         else:
-                            self.log_message(f"Failed to message user {i+1}, waiting 2 seconds and retrying...")
-                            time.sleep(2)
-                            # Try sending message again
-                            if self.send_message_to_user(button):
-                                success_count += 1
-                                self.log_message(f"Successfully messaged user {i+1} on retry")
-                                if not self.is_running:
-                                    self.log_message("Stopping automation - stop button clicked")
-                                    break
-                                time.sleep(1)
-                            else:
-                                self.log_message(f"Failed to message user {i+1} even after retry")
+                            # Message failed, log and continue to next user
+                            self.log_message(f"Failed to message user {i+1}")
+                            # Remove from currently messaging
+                            self.currently_messaging.discard(user_id)
                             
                     except (TimeoutException, WebDriverException, NoSuchElementException) as e:
                         self.log_message(f"Error messaging user {i+1}: {str(e)}")
@@ -315,6 +331,7 @@ class CoFoundersLabBot:
                             break
                         
                 self.log_message(f"Successfully messaged {success_count} users on page {self.current_page}")
+                self.log_message(f"Total users messaged so far: {len(self.messaged_users)}")
                 
                 # Go to next page
                 if self.is_running:
@@ -428,6 +445,10 @@ class CoFoundersLabBot:
             # Check stop condition before starting
             if not self.is_running:
                 return False
+                
+            # Additional safety check - this should not happen due to outer logic
+            # but adding as extra protection
+            self.log_message("Attempting to send message to user...")
                 
             # Click the message button
             self.driver.execute_script("arguments[0].click();", message_button)
@@ -572,34 +593,8 @@ class CoFoundersLabBot:
                         continue
                     
             if not send_button:
-                self.log_message("Could not find send button, waiting 2 seconds and retrying...")
-                time.sleep(2)
-                
-                # Try again with a simpler approach
-                try:
-                    # Try the most common selectors again
-                    simple_selectors = [
-                        "button:contains('Send')",
-                        "button[type='submit']",
-                        "button.bg-primary",
-                        "button.sm\\:col-start-2"
-                    ]
-                    
-                    for selector in simple_selectors:
-                        try:
-                            send_button = modal.find_element(By.CSS_SELECTOR, selector)
-                            if send_button:
-                                self.log_message(f"Found send button on retry with selector: {selector}")
-                                break
-                        except:
-                            continue
-                            
-                except:
-                    pass
-                    
-                if not send_button:
-                    self.log_message("Could not find send button even after retry")
-                    return False
+                self.log_message("Could not find send button")
+                return False
                 
             # Check stop condition before sending
             if not self.is_running:
