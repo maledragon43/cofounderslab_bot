@@ -3,6 +3,7 @@ from tkinter import ttk, scrolledtext, messagebox
 import threading
 import time
 import re
+import os
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -25,6 +26,7 @@ class CoFoundersLabBot:
         self.message_text = ""
         self.messaged_users = set()  # Track messaged users to prevent duplicates
         self.currently_messaging = set()  # Track users currently being messaged
+        self.progress_file = "bot_progress.txt"  # File to save progress
         
         # Setup logging
         logging.basicConfig(level=logging.INFO)
@@ -92,7 +94,11 @@ class CoFoundersLabBot:
         
         # Save log button
         save_log_btn = ttk.Button(log_controls_frame, text="Save Log", command=self.save_log)
-        save_log_btn.grid(row=0, column=1)
+        save_log_btn.grid(row=0, column=1, padx=(0, 10))
+        
+        # Load progress button
+        load_progress_btn = ttk.Button(log_controls_frame, text="Load Progress", command=self.load_progress)
+        load_progress_btn.grid(row=0, column=2)
         
         # Configure grid weights
         self.root.columnconfigure(0, weight=1)
@@ -130,6 +136,77 @@ class CoFoundersLabBot:
                 self.log_message(f"Log saved to: {filename}")
         except Exception as e:
             self.log_message(f"Error saving log: {str(e)}")
+            
+    def save_progress(self, url, page_number, messaged_count):
+        """Save current progress to file"""
+        try:
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            progress_data = {
+                "last_url": url,
+                "page_number": page_number,
+                "messaged_count": messaged_count,
+                "timestamp": timestamp,
+                "total_messaged": len(self.messaged_users)
+            }
+            
+            with open(self.progress_file, 'w', encoding='utf-8') as f:
+                f.write(f"CoFoundersLab Bot Progress\n")
+                f.write(f"========================\n")
+                f.write(f"Last URL: {url}\n")
+                f.write(f"Page Number: {page_number}\n")
+                f.write(f"Users Messaged on Last Page: {messaged_count}\n")
+                f.write(f"Total Users Messaged: {len(self.messaged_users)}\n")
+                f.write(f"Last Updated: {timestamp}\n")
+                f.write(f"\nSession Data:\n")
+                f.write(f"Messaged Users: {', '.join(sorted(self.messaged_users))}\n")
+            
+            self.log_message(f"Progress saved: Page {page_number}, {len(self.messaged_users)} total users messaged")
+            
+        except Exception as e:
+            self.log_message(f"Error saving progress: {str(e)}")
+            
+    def load_progress(self):
+        """Load progress from file"""
+        try:
+            if not os.path.exists(self.progress_file):
+                self.log_message("No previous progress file found")
+                messagebox.showinfo("No Progress", "No previous progress file found.")
+                return None
+                
+            with open(self.progress_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+                
+            # Extract information from progress file
+            lines = content.split('\n')
+            progress_info = {}
+            
+            for line in lines:
+                if line.startswith("Last URL:"):
+                    progress_info['url'] = line.split(":", 1)[1].strip()
+                elif line.startswith("Page Number:"):
+                    progress_info['page'] = int(line.split(":", 1)[1].strip())
+                elif line.startswith("Total Users Messaged:"):
+                    progress_info['total_messaged'] = int(line.split(":", 1)[1].strip())
+                    
+            if progress_info:
+                self.log_message(f"Loaded previous progress: Page {progress_info.get('page', 'unknown')}, {progress_info.get('total_messaged', 0)} users messaged")
+                messagebox.showinfo("Progress Loaded", 
+                    f"Previous progress found:\n"
+                    f"Page: {progress_info.get('page', 'unknown')}\n"
+                    f"Total Users Messaged: {progress_info.get('total_messaged', 0)}\n"
+                    f"Last URL: {progress_info.get('url', 'unknown')}")
+                return progress_info
+            else:
+                self.log_message("Could not parse progress file")
+                messagebox.showerror("Parse Error", "Could not parse progress file.")
+                return None
+                
+        except Exception as e:
+            self.log_message(f"Error loading progress: {str(e)}")
+            messagebox.showerror("Error", f"Error loading progress: {str(e)}")
+            return None
         
     def update_status(self, status):
         """Update status label"""
@@ -333,6 +410,10 @@ class CoFoundersLabBot:
                 self.log_message(f"Successfully messaged {success_count} users on page {self.current_page}")
                 self.log_message(f"Total users messaged so far: {len(self.messaged_users)}")
                 
+                # Save progress after completing the page
+                current_url = self.driver.current_url
+                self.save_progress(current_url, self.current_page, success_count)
+                
                 # Go to next page
                 if self.is_running:
                     if self.go_to_next_page():
@@ -365,13 +446,16 @@ class CoFoundersLabBot:
     def find_message_buttons(self):
         """Find all message buttons on the current page"""
         try:
-            # Wait for page to load
-            WebDriverWait(self.driver, 10).until(
+            self.log_message("Waiting for message buttons to load (max 20 seconds)...")
+            
+            # Wait for page to load with extended timeout
+            WebDriverWait(self.driver, 20).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "[class*='message'], [class*='Message'], button"))
             )
+            self.log_message("Basic buttons detected, waiting for dynamic content...")
             
-            # Wait a bit more for dynamic content to load
-            time.sleep(1)
+            # Wait longer for dynamic content to load
+            time.sleep(3)
             
             # Try different selectors for message buttons
             selectors = [
@@ -460,15 +544,18 @@ class CoFoundersLabBot:
             
             # Wait for modal to appear
             try:
-                modal = WebDriverWait(self.driver, 10).until(
+                self.log_message("Waiting for message modal to appear (max 20 seconds)...")
+                modal = WebDriverWait(self.driver, 20).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, "[class*='modal'], [class*='Modal'], [role='dialog']"))
                 )
-                time.sleep(1)  # Wait 1 second for modal to fully load
+                self.log_message("Modal detected, waiting for it to fully load...")
+                time.sleep(3)  # Wait 3 seconds for modal to fully load
             except TimeoutException:
-                self.log_message("Modal did not appear")
+                self.log_message("Modal did not appear within 20 seconds")
                 return False
                 
             # Find text input in modal
+            self.log_message("Waiting for text input field to be available...")
             text_input = None
             input_selectors = [
                 "textarea",
@@ -480,10 +567,24 @@ class CoFoundersLabBot:
                 "[class*='Message'] textarea"
             ]
             
+            # Wait for text input to be present
+            try:
+                WebDriverWait(modal, 20).until(
+                    EC.any_of(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "textarea")),
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='text']")),
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='textarea']"))
+                    )
+                )
+                self.log_message("Text input field detected")
+            except TimeoutException:
+                self.log_message("Text input not detected within 20 seconds, but continuing...")
+            
             for selector in input_selectors:
                 try:
                     text_input = modal.find_element(By.CSS_SELECTOR, selector)
                     if text_input:
+                        self.log_message(f"Found text input with selector: {selector}")
                         break
                 except (NoSuchElementException, TimeoutException):
                     continue
@@ -511,6 +612,21 @@ class CoFoundersLabBot:
             
             # Find and click send button
             self.log_message("Looking for send button after entering message...")
+            self.log_message("Waiting for send button to be available (max 20 seconds)...")
+            
+            # Wait for send button to be present and clickable
+            try:
+                WebDriverWait(self.driver, 20).until(
+                    EC.any_of(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "button:contains('Send')")),
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "button[type='submit']")),
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "button.bg-primary"))
+                    )
+                )
+                self.log_message("Send button detected, proceeding...")
+            except TimeoutException:
+                self.log_message("Send button not detected within 20 seconds, but continuing...")
+            
             send_button = None
             send_selectors = [
                 # Specific CoFoundersLab send button selector
@@ -654,6 +770,10 @@ class CoFoundersLabBot:
             self.driver.get(new_url)
             time.sleep(1)  # Wait 1 second for page navigation
             self.current_page += 1
+            
+            # Save progress after navigating to next page
+            self.save_progress(new_url, self.current_page, 0)  # 0 because we haven't messaged anyone on new page yet
+            
             return True
             
         except (WebDriverException, ValueError) as e:
@@ -663,27 +783,29 @@ class CoFoundersLabBot:
     def wait_for_page_load(self):
         """Wait for page to fully load"""
         try:
+            self.log_message("Waiting for page to fully load (max 20 seconds)...")
+            
             # Wait for document ready state
-            WebDriverWait(self.driver, 15).until(
+            WebDriverWait(self.driver, 20).until(
                 lambda driver: driver.execute_script("return document.readyState") == "complete"
             )
             self.log_message("Document ready state: complete")
             
             # Wait for any loading indicators to disappear
-            time.sleep(2)
+            time.sleep(3)
             
             # Wait for user cards to be present
-            WebDriverWait(self.driver, 10).until(
+            WebDriverWait(self.driver, 20).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "button, [class*='card'], [class*='user']"))
             )
             self.log_message("User cards detected on page")
             
             # Additional wait for dynamic content
-            time.sleep(1)
+            time.sleep(2)
             self.log_message("Page fully loaded and ready")
             
         except TimeoutException:
-            self.log_message("Page load timeout, but continuing...")
+            self.log_message("Page load timeout after 20 seconds, but continuing...")
         except Exception as e:
             self.log_message(f"Error waiting for page load: {str(e)}")
             
