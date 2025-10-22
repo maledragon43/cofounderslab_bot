@@ -523,6 +523,82 @@ class CoFoundersLabBot:
             self.log_message(f"Error finding message buttons: {str(e)}")
             return []
             
+    def extract_user_name(self, message_button):
+        """Extract user name from the user card containing the message button"""
+        try:
+            self.log_message("Extracting user name from user card...")
+            
+            # Method 1: Look for the specific structure you provided
+            # <div class="flex items-center gap-1"><p>Alex Marouf</p></div>
+            try:
+                name_element = message_button.find_element(By.XPATH, ".//div[contains(@class, 'flex') and contains(@class, 'items-center')]//p")
+                if name_element and name_element.text.strip():
+                    user_name = name_element.text.strip()
+                    self.log_message(f"Found user name (method 1): {user_name}")
+                    return user_name
+            except:
+                pass
+            
+            # Method 2: Look in parent elements for the name structure
+            user_card = message_button
+            max_levels = 8  # Prevent infinite loop
+            
+            for level in range(max_levels):
+                try:
+                    # Look for the specific div structure with p tag
+                    name_element = user_card.find_element(By.XPATH, ".//div[contains(@class, 'flex') and contains(@class, 'items-center')]//p")
+                    if name_element and name_element.text.strip():
+                        user_name = name_element.text.strip()
+                        self.log_message(f"Found user name (method 2, level {level}): {user_name}")
+                        return user_name
+                except:
+                    pass
+                
+                # Also try direct p tag search
+                try:
+                    name_element = user_card.find_element(By.CSS_SELECTOR, "p")
+                    if name_element and name_element.text.strip():
+                        user_name = name_element.text.strip()
+                        self.log_message(f"Found user name (method 2b, level {level}): {user_name}")
+                        return user_name
+                except:
+                    pass
+                
+                # Move to parent element
+                try:
+                    user_card = user_card.find_element(By.XPATH, "..")
+                except:
+                    break
+            
+            # Method 3: Search for names near the button by position
+            try:
+                button_location = message_button.location
+                all_p_elements = self.driver.find_elements(By.CSS_SELECTOR, "p")
+                
+                for p_element in all_p_elements:
+                    try:
+                        p_location = p_element.location
+                        p_text = p_element.text.strip()
+                        
+                        # Check if p element is near the button and has text
+                        if (p_text and 
+                            abs(p_location['x'] - button_location['x']) < 300 and 
+                            abs(p_location['y'] - button_location['y']) < 150):
+                            user_name = p_text
+                            self.log_message(f"Found user name (method 3): {user_name}")
+                            return user_name
+                    except:
+                        continue
+            except:
+                pass
+                
+            self.log_message("Could not extract user name")
+            return None
+            
+        except Exception as e:
+            self.log_message(f"Error extracting user name: {str(e)}")
+            return None
+
     def send_message_to_user(self, message_button):
         """Send message to a specific user"""
         try:
@@ -530,8 +606,19 @@ class CoFoundersLabBot:
             if not self.is_running:
                 return False
                 
-            # Additional safety check - this should not happen due to outer logic
-            # but adding as extra protection
+            # Extract user name for personalization
+            user_name = self.extract_user_name(message_button)
+            
+            # Create personalized message
+            if user_name:
+                personalized_message = self.message_text.replace("Hi there", f"Hi {user_name}")
+                if personalized_message == self.message_text:  # If no "Hi there" found, add greeting
+                    personalized_message = f"Hi {user_name},\n\n{self.message_text}"
+                self.log_message(f"Personalized message for {user_name}")
+            else:
+                personalized_message = self.message_text
+                self.log_message("Using original message (no user name found)")
+                
             self.log_message("Attempting to send message to user...")
                 
             # Click the message button
@@ -597,10 +684,10 @@ class CoFoundersLabBot:
             if not self.is_running:
                 return False
                 
-            # Clear and enter message
+            # Clear and enter personalized message
             text_input.clear()
             time.sleep(0.5)  # Wait 0.5 seconds before typing
-            text_input.send_keys(self.message_text)
+            text_input.send_keys(personalized_message)
             time.sleep(1)  # Wait 1 second after typing
             
             # Check stop condition after entering message
