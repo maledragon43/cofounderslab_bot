@@ -1,10 +1,10 @@
 CoFoundersLab Bot Progress
 ========================
-Last URL: https://cofounderslab.com/profile/brandon-cole-jxiuye?page=4
-Page Number: 4
+Last URL: https://cofounderslab.com/search?countryCode=US&page=1168
+Page Number: 1168
 Users Messaged on Last Page: 0
 Total Users Messaged: 0
-Last Updated: 2025-10-22 14:46:29
+Last Updated: 2025-10-22 15:22:10
 
 Session Data:
 Messaged Users: 

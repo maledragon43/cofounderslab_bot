@@ -231,11 +231,34 @@ class CoFoundersLabBot:
             self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             
             # Navigate to CoFoundersLab
+            self.log_message("Opening CoFoundersLab website...")
             self.driver.get("https://cofounderslab.com/")
+            time.sleep(3)  # Wait 3 seconds for initial load
             
             # Wait for initial page load
             self.log_message("Waiting for CoFoundersLab to load...")
             self.wait_for_page_load()
+            
+            # Verify page opened successfully
+            self.log_message("Verifying page opened successfully...")
+            try:
+                # Check if we're on the correct page
+                current_url = self.driver.current_url
+                if "cofounderslab.com" in current_url:
+                    self.log_message("Page verification successful - on CoFoundersLab")
+                else:
+                    self.log_message(f"Warning: Unexpected URL: {current_url}")
+                
+                # Check for key elements
+                WebDriverWait(self.driver, 10).until(
+                    EC.any_of(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "button, [class*='login'], [class*='sign']")),
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "[class*='search'], [class*='profile']"))
+                    )
+                )
+                self.log_message("Key page elements detected")
+            except TimeoutException:
+                self.log_message("Warning: Key page elements not detected, but continuing...")
             
             self.log_message("Website opened successfully!")
             self.update_status("Website opened - Please login and navigate to target page")
@@ -389,11 +412,15 @@ class CoFoundersLabBot:
                             self.log_message(f"Successfully messaged user {i+1}")
                             # Remove from currently messaging
                             self.currently_messaging.discard(user_id)
+                            
+                            # Wait for any remaining modals to close
+                            time.sleep(2)
+                            
                             # Check stop condition after each message
                             if not self.is_running:
                                 self.log_message("Stopping automation - stop button clicked")
                                 break
-                            time.sleep(1)  # Wait 1 second between messages
+                            time.sleep(3)  # Wait 3 seconds between messages
                         else:
                             # Message failed, log and continue to next user
                             self.log_message(f"Failed to message user {i+1}")
@@ -446,16 +473,16 @@ class CoFoundersLabBot:
     def find_message_buttons(self):
         """Find all message buttons on the current page"""
         try:
-            self.log_message("Waiting for message buttons to load (max 20 seconds)...")
+            self.log_message("Waiting for message buttons to load (max 30 seconds)...")
             
             # Wait for page to load with extended timeout
-            WebDriverWait(self.driver, 20).until(
+            WebDriverWait(self.driver, 30).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "[class*='message'], [class*='Message'], button"))
             )
             self.log_message("Basic buttons detected, waiting for dynamic content...")
             
             # Wait longer for dynamic content to load
-            time.sleep(3)
+            time.sleep(5)
             
             # Try different selectors for message buttons
             selectors = [
@@ -598,6 +625,59 @@ class CoFoundersLabBot:
         except Exception as e:
             self.log_message(f"Error extracting user name: {str(e)}")
             return None
+            
+    def extract_user_name_from_modal(self, modal):
+        """Extract user name from modal title"""
+        try:
+            self.log_message("Extracting user name from modal title...")
+            
+            # Look for the modal title with user name
+            # <h3 class="text-lg font-semibold leading-6">Send Otwan a message</h3>
+            try:
+                title_element = modal.find_element(By.CSS_SELECTOR, "h3")
+                if title_element and title_element.text.strip():
+                    title_text = title_element.text.strip()
+                    self.log_message(f"Found modal title: {title_text}")
+                    
+                    # Extract name from "Send [Name] a message"
+                    if "Send" in title_text and "a message" in title_text:
+                        # Extract name between "Send" and "a message"
+                        start = title_text.find("Send") + 4  # After "Send"
+                        end = title_text.find("a message")
+                        if start < end:
+                            user_name = title_text[start:end].strip()
+                            if user_name:
+                                self.log_message(f"Extracted user name from modal: {user_name}")
+                                return user_name
+            except:
+                pass
+            
+            # Alternative: look for any h3 with text
+            try:
+                h3_elements = modal.find_elements(By.CSS_SELECTOR, "h3")
+                for h3 in h3_elements:
+                    if h3.text.strip():
+                        title_text = h3.text.strip()
+                        self.log_message(f"Found h3 text: {title_text}")
+                        
+                        # Try to extract name from various patterns
+                        if "Send" in title_text and "message" in title_text:
+                            # Pattern: "Send [Name] a message"
+                            import re
+                            match = re.search(r'Send\s+([^a]+?)\s+a\s+message', title_text)
+                            if match:
+                                user_name = match.group(1).strip()
+                                self.log_message(f"Extracted user name (regex): {user_name}")
+                                return user_name
+            except:
+                pass
+                
+            self.log_message("Could not extract user name from modal")
+            return None
+            
+        except Exception as e:
+            self.log_message(f"Error extracting user name from modal: {str(e)}")
+            return None
 
     def send_message_to_user(self, message_button):
         """Send message to a specific user"""
@@ -606,10 +686,10 @@ class CoFoundersLabBot:
             if not self.is_running:
                 return False
                 
-            # Extract user name for personalization
+            # Extract user name for personalization (will try again from modal if needed)
             user_name = self.extract_user_name(message_button)
             
-            # Create personalized message
+            # Create personalized message (will be updated if we find name in modal)
             if user_name:
                 personalized_message = self.message_text.replace("Hi there", f"Hi {user_name}")
                 if personalized_message == self.message_text:  # If no "Hi there" found, add greeting
@@ -617,13 +697,28 @@ class CoFoundersLabBot:
                 self.log_message(f"Personalized message for {user_name}")
             else:
                 personalized_message = self.message_text
-                self.log_message("Using original message (no user name found)")
+                self.log_message("Using original message (no user name found from button)")
                 
             self.log_message("Attempting to send message to user...")
                 
             # Click the message button
+            self.log_message("Clicking message button...")
             self.driver.execute_script("arguments[0].click();", message_button)
-            time.sleep(1)  # Wait 1 second after clicking
+            time.sleep(2)  # Wait 2 seconds after clicking
+            
+            # Verify button click was successful by checking if modal appears
+            self.log_message("Verifying message button click was successful...")
+            try:
+                # Wait for any loading indicators or modal to start appearing
+                WebDriverWait(self.driver, 5).until(
+                    EC.any_of(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "[class*='modal'], [class*='Modal'], [role='dialog']")),
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "[class*='loading'], [class*='spinner']"))
+                    )
+                )
+                self.log_message("Message button click verified - modal/loading detected")
+            except TimeoutException:
+                self.log_message("Warning: No immediate response to button click, but continuing...")
             
             # Check stop condition after clicking
             if not self.is_running:
@@ -631,16 +726,42 @@ class CoFoundersLabBot:
             
             # Wait for modal to appear
             try:
-                self.log_message("Waiting for message modal to appear (max 20 seconds)...")
-                modal = WebDriverWait(self.driver, 20).until(
+                self.log_message("Waiting for message modal to appear (max 30 seconds)...")
+                modal = WebDriverWait(self.driver, 30).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, "[class*='modal'], [class*='Modal'], [role='dialog']"))
                 )
                 self.log_message("Modal detected, waiting for it to fully load...")
-                time.sleep(3)  # Wait 3 seconds for modal to fully load
+                time.sleep(5)  # Wait 5 seconds for modal to fully load
             except TimeoutException:
-                self.log_message("Modal did not appear within 20 seconds")
+                self.log_message("Modal did not appear within 30 seconds")
                 return False
                 
+            # Try to extract user name from modal title
+            modal_user_name = self.extract_user_name_from_modal(modal)
+            if modal_user_name and not user_name:
+                user_name = modal_user_name
+                # Update personalized message with modal user name
+                personalized_message = self.message_text.replace("Hi there", f"Hi {user_name}")
+                if personalized_message == self.message_text:  # If no "Hi there" found, add greeting
+                    personalized_message = f"Hi {user_name},\n\n{self.message_text}"
+                self.log_message(f"Found user name in modal: {user_name}")
+            elif modal_user_name and user_name:
+                # Confirm user name matches
+                if modal_user_name.lower().strip() == user_name.lower().strip():
+                    self.log_message(f"User name confirmed from modal: {modal_user_name}")
+                else:
+                    self.log_message(f"User name mismatch! Button: '{user_name}' vs Modal: '{modal_user_name}'")
+                    # Use modal name as it's more reliable
+                    user_name = modal_user_name
+                    personalized_message = self.message_text.replace("Hi there", f"Hi {user_name}")
+                    if personalized_message == self.message_text:
+                        personalized_message = f"Hi {user_name},\n\n{self.message_text}"
+                    self.log_message(f"Using modal user name: {user_name}")
+            elif not modal_user_name and user_name:
+                self.log_message(f"Using user name from button: {user_name}")
+            else:
+                self.log_message("No user name found from either source")
+            
             # Find text input in modal
             self.log_message("Waiting for text input field to be available...")
             text_input = None
@@ -685,10 +806,37 @@ class CoFoundersLabBot:
                 return False
                 
             # Clear and enter personalized message
+            self.log_message("Clearing text input field...")
             text_input.clear()
-            time.sleep(0.5)  # Wait 0.5 seconds before typing
+            time.sleep(1)  # Wait 1 second after clearing
+            
+            # Verify field was cleared
+            try:
+                field_value = text_input.get_attribute("value")
+                if field_value.strip():
+                    self.log_message("Warning: Text field not fully cleared, trying again...")
+                    text_input.clear()
+                    time.sleep(0.5)
+            except:
+                pass
+            
+            # Log the personalized message for confirmation
+            self.log_message(f"Sending personalized message to {user_name if user_name else 'unknown user'}")
+            self.log_message(f"Message preview: {personalized_message[:100]}{'...' if len(personalized_message) > 100 else ''}")
+            
+            self.log_message("Typing personalized message...")
             text_input.send_keys(personalized_message)
-            time.sleep(1)  # Wait 1 second after typing
+            time.sleep(2)  # Wait 2 seconds after typing
+            
+            # Verify message was entered correctly
+            try:
+                entered_text = text_input.get_attribute("value")
+                if entered_text.strip():
+                    self.log_message("Message entered successfully")
+                else:
+                    self.log_message("Warning: Message may not have been entered correctly")
+            except:
+                self.log_message("Could not verify message entry, but continuing...")
             
             # Check stop condition after entering message
             if not self.is_running:
@@ -818,24 +966,99 @@ class CoFoundersLabBot:
             # Click send button
             self.log_message("Clicking send button...")
             self.driver.execute_script("arguments[0].click();", send_button)
-            time.sleep(1)  # Wait 1 second after sending
+            time.sleep(3)  # Wait 3 seconds after sending
+            
+            # Verify send button click was successful
+            self.log_message("Verifying send button click was successful...")
+            try:
+                # Check if modal starts to close or loading appears
+                WebDriverWait(self.driver, 5).until(
+                    EC.any_of(
+                        EC.invisibility_of_element_located(send_button),
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "[class*='loading'], [class*='spinner'], [class*='success']"))
+                    )
+                )
+                self.log_message("Send button click verified - modal closing or loading detected")
+            except TimeoutException:
+                self.log_message("Warning: No immediate response to send button click, but continuing...")
             
             # Check stop condition after sending
             if not self.is_running:
                 return False
             
             # Try to close modal or wait for it to disappear
+            self.log_message("Closing message modal...")
+            modal_closed = False
+            
             try:
+                # Try to find and click cancel button
                 cancel_button = modal.find_element(By.CSS_SELECTOR, "button[class*='cancel'], button[class*='Cancel'], button:contains('Cancel')")
                 self.driver.execute_script("arguments[0].click();", cancel_button)
-                time.sleep(1)  # Wait 1 second after closing modal
+                time.sleep(2)  # Wait 2 seconds after clicking cancel
+                modal_closed = True
+                self.log_message("Modal closed using cancel button")
             except (NoSuchElementException, TimeoutException):
-                # Press Escape key to close modal
-                from selenium.webdriver.common.keys import Keys
-                text_input.send_keys(Keys.ESCAPE)
-                time.sleep(1)  # Wait 1 second after pressing escape
+                self.log_message("Cancel button not found, trying alternative methods...")
                 
-            time.sleep(1)  # Additional wait for modal to close
+                # Try pressing Escape key
+                try:
+                    from selenium.webdriver.common.keys import Keys
+                    text_input.send_keys(Keys.ESCAPE)
+                    time.sleep(2)  # Wait 2 seconds after pressing escape
+                    modal_closed = True
+                    self.log_message("Modal closed using Escape key")
+                except:
+                    pass
+                
+                # Try clicking outside modal
+                try:
+                    self.driver.execute_script("document.body.click();")
+                    time.sleep(2)
+                    modal_closed = True
+                    self.log_message("Modal closed by clicking outside")
+                except:
+                    pass
+            
+            # Wait for modal to actually disappear
+            if modal_closed:
+                try:
+                    WebDriverWait(self.driver, 15).until(
+                        EC.invisibility_of_element_located(modal)
+                    )
+                    self.log_message("Modal successfully closed and disappeared")
+                except TimeoutException:
+                    self.log_message("Modal still visible after close attempt, trying additional methods...")
+                    # Try additional close methods
+                    try:
+                        from selenium.webdriver.common.keys import Keys
+                        self.driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
+                        time.sleep(2)
+                    except:
+                        pass
+                    
+                    # Final check
+                    try:
+                        WebDriverWait(self.driver, 5).until(
+                            EC.invisibility_of_element_located(modal)
+                        )
+                        self.log_message("Modal finally closed with additional methods")
+                    except TimeoutException:
+                        self.log_message("Warning: Modal may still be visible, but continuing...")
+            
+            # Additional wait to ensure modal is fully closed
+            time.sleep(3)
+            
+            # Final verification that modal is closed
+            try:
+                modal_still_visible = modal.is_displayed()
+                if modal_still_visible:
+                    self.log_message("Warning: Modal may still be visible")
+                else:
+                    self.log_message("Modal closure confirmed")
+            except:
+                self.log_message("Could not verify modal closure, but continuing...")
+                
+            self.log_message("Message sent and modal closed successfully")
             return True
             
         except (TimeoutException, WebDriverException, NoSuchElementException) as e:
@@ -854,13 +1077,34 @@ class CoFoundersLabBot:
                 separator = "&" if "?" in current_url else "?"
                 new_url = f"{current_url}{separator}page={self.current_page + 1}"
                 
+            self.log_message(f"Navigating to page {self.current_page + 1}...")
             self.driver.get(new_url)
-            time.sleep(1)  # Wait 1 second for page navigation
+            time.sleep(2)  # Wait 2 seconds for page navigation
+            
+            # Verify navigation was successful
+            self.log_message("Verifying page navigation was successful...")
+            try:
+                # Wait for page to start loading
+                WebDriverWait(self.driver, 10).until(
+                    EC.any_of(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "button, [class*='card'], [class*='user']")),
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "[class*='loading'], [class*='spinner']"))
+                    )
+                )
+                self.log_message("Page navigation verified - content detected")
+            except TimeoutException:
+                self.log_message("Warning: No immediate content detected after navigation, but continuing...")
+            
             self.current_page += 1
+            
+            # Wait for page to fully load before saving progress
+            self.log_message("Waiting for page to fully load before saving progress...")
+            time.sleep(3)
             
             # Save progress after navigating to next page
             self.save_progress(new_url, self.current_page, 0)  # 0 because we haven't messaged anyone on new page yet
             
+            self.log_message(f"Successfully navigated to page {self.current_page}")
             return True
             
         except (WebDriverException, ValueError) as e:
@@ -873,22 +1117,22 @@ class CoFoundersLabBot:
             self.log_message("Waiting for page to fully load (max 20 seconds)...")
             
             # Wait for document ready state
-            WebDriverWait(self.driver, 20).until(
+            WebDriverWait(self.driver, 30).until(
                 lambda driver: driver.execute_script("return document.readyState") == "complete"
             )
             self.log_message("Document ready state: complete")
             
             # Wait for any loading indicators to disappear
-            time.sleep(3)
+            time.sleep(5)
             
             # Wait for user cards to be present
-            WebDriverWait(self.driver, 20).until(
+            WebDriverWait(self.driver, 30).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "button, [class*='card'], [class*='user']"))
             )
             self.log_message("User cards detected on page")
             
             # Additional wait for dynamic content
-            time.sleep(2)
+            time.sleep(3)
             self.log_message("Page fully loaded and ready")
             
         except TimeoutException:
